@@ -93,30 +93,31 @@ class reactive_follow_gap:
         disparity_dist = 0.5
         # Rejecting high values
         ranges[ranges > 5.0] = 5
-        for i in range(len(ranges)):
-            if( i < len(ranges) - 1):
-                if ranges[i+1] - ranges[i] > disparity_dist:
-                    steps_to_skip = disparity_count =  (width_car) // (ranges[i] * angle_incre) + 6
+        meaningful_ranges = ranges[start_i: end_i]
+        for i in range(len(meaningful_ranges)):
+            if( i < len(meaningful_ranges) - 1):
+                if meaningful_ranges[i+1] - meaningful_ranges[i] > disparity_dist:
+                    steps_to_skip = disparity_count =  (width_car) // (meaningful_ranges[i] * angle_incre)
                     a = 1
                     # print(disparity_count)
-                    while(disparity_count > 0 and i + a < len(ranges)):
-                        ranges[i + a] = ranges[i]
+                    while(disparity_count > 0 and i + a < len(meaningful_ranges)):
+                        meaningful_ranges[i + a] = meaningful_ranges[i]
                         disparity_count -= 1
                         a += 1
-                    i += steps_to_skip
+                    # i += steps_to_skip
                     continue
-                elif ranges[i] - ranges[i+1] > disparity_dist:
-                    steps_to_skip = disparity_count = (width_car) // (ranges[i] * angle_incre) + 6
+                elif meaningful_ranges[i] - meaningful_ranges[i+1] > disparity_dist:
+                    steps_to_skip = disparity_count = (width_car) // (meaningful_ranges[i] * angle_incre)
                     a = 0
                     # print(disparity_count)
-                    while(disparity_count > 0 and i - a >= 0):
-                        ranges[i - a] = ranges[i+1]
+                    while(disparity_count > 0 and i - a >= 0 and i + 1 <len(meaningful_ranges)):
+                        meaningful_ranges[i + a] = meaningful_ranges[i+1]
                         disparity_count -= 1
                         a -= 1
-                    i += steps_to_skip
+                    # i += steps_to_skip
                     continue
         # print(ranges)
-        return np.argmax(ranges[start_i : end_i])
+        return np.argmax(meaningful_ranges) + start_i
         
 
     def lidar_callback(self, data):
