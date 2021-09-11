@@ -15,6 +15,7 @@ from ackermann_msgs.msg import AckermannDriveStamped, AckermannDrive
 
 #Lidar Preprocess variables
 detect_angle = 120
+max_detect_dist = 2.3
 past_ranges_t1 = past_ranges_t2 = past_ranges_t3 = past_ranges_t4 = current_ranges_t5 = np.zeros(int(1080 * detect_angle / 360))
 width_car = 0.2032
 
@@ -41,7 +42,7 @@ class reactive_follow_gap:
             1.Setting each value to the mean over some window
             2.Rejecting high values (eg. > 3m)
         """
-        global past_ranges_t1, past_ranges_t2, past_ranges_t3, past_ranges_t4, current_ranges_t5
+        global past_ranges_t1, past_ranges_t2, past_ranges_t3, past_ranges_t4, current_ranges_t5, max_detect_dist
         past_ranges_t1 = past_ranges_t2
         past_ranges_t2 = past_ranges_t3
         past_ranges_t3 = past_ranges_t4
@@ -52,7 +53,7 @@ class reactive_follow_gap:
         proc_ranges = 0.5 * current_ranges_t5 + 0.25 * past_ranges_t4 + 0.15 * past_ranges_t3 + 0.07 * past_ranges_t2 + 0.03 * past_ranges_t1
         
         # Rejecting high values
-        proc_ranges[proc_ranges > 3.0] = 3
+        proc_ranges[proc_ranges > max_detect_dist] = max_detect_dist
         return proc_ranges
 
     def find_max_gap(self, free_space_ranges):
@@ -91,32 +92,33 @@ class reactive_follow_gap:
         global width_car
         accum_dist = 0.0
         disparity_dist = 0.5
-        # Rejecting high values
-        ranges[ranges > 5.0] = 5
-        meaningful_ranges = ranges[start_i: end_i]
+        meaningful_ranges = ranges[start_i: end_i+2]
+        # print("New start")
         for i in range(len(meaningful_ranges)):
             if( i < len(meaningful_ranges) - 1):
                 if meaningful_ranges[i+1] - meaningful_ranges[i] > disparity_dist:
-                    steps_to_skip = disparity_count =  (width_car) // (meaningful_ranges[i] * angle_incre)
+                    # print("Enter1")
+                    steps_to_skip = disparity_count =  (width_car) // (meaningful_ranges[i] * angle_incre) 
                     a = 1
                     # print(disparity_count)
                     while(disparity_count > 0 and i + a < len(meaningful_ranges)):
                         meaningful_ranges[i + a] = meaningful_ranges[i]
                         disparity_count -= 1
                         a += 1
-                    # i += steps_to_skip
+                    i += steps_to_skip - 1
                     continue
                 elif meaningful_ranges[i] - meaningful_ranges[i+1] > disparity_dist:
-                    steps_to_skip = disparity_count = (width_car) // (meaningful_ranges[i] * angle_incre)
+                    steps_to_skip = disparity_count = (width_car) // (meaningful_ranges[i] * angle_incre) 
                     a = 0
-                    # print(disparity_count)
+                    # print("Enter2")
                     while(disparity_count > 0 and i - a >= 0 and i + 1 <len(meaningful_ranges)):
                         meaningful_ranges[i + a] = meaningful_ranges[i+1]
                         disparity_count -= 1
                         a -= 1
-                    # i += steps_to_skip
+                    i += steps_to_skip - 1
                     continue
-        # print(ranges)
+                # print(meaningful_ranges[i] - meaningful_ranges[i+1])
+        # print(meaningful_ranges)
         return np.argmax(meaningful_ranges) + start_i
         
 
@@ -139,13 +141,14 @@ class reactive_follow_gap:
                 proc_ranges[i] = 0   
 
         #Find max length gap 
-        start_i = self.find_max_gap(proc_ranges)[0]
-        end_i = self.find_max_gap(proc_ranges)[1]
+        max_gap_indeces = self.find_max_gap(proc_ranges)
+        start_i = max_gap_indeces[0]
+        end_i = max_gap_indeces[1]
         angle_incre = data.angle_increment
 
         #Find the best point in the gap
-        best_point_index = self.find_best_point(start_i, end_i, ranges, angle_incre) + start_i
-
+        best_point_index = self.find_best_point(start_i, end_i, proc_ranges, angle_incre) + start_i
+        # print(best_point_index)
         #Implement PID controller for steering angle
         current_time = rospy.get_time()
         del_time = current_time - prev_time
@@ -165,13 +168,13 @@ class reactive_follow_gap:
         else:
             drive_msg.drive.steering_angle = angle
         if abs(angle) > math.radians(0) and abs(angle) <= math.radians(10):
-            drive_msg.drive.speed = 1.5
+            drive_msg.drive.speed = 3.5
             # drive_msg.drive.steering_angle_velocity = 0.3
         elif abs(angle) > math.radians(10) and abs (angle) <= math.radians(20):
-            drive_msg.drive.speed = 1.0
+            drive_msg.drive.speed = 2.0
             # drive_msg.drive.steering_angle_velocity = 0.5
         else:
-            drive_msg.drive.speed = 0.5
+            drive_msg.drive.speed = 1.0
             # drive_msg.drive.steering_angle_velocity = 1.5
         self.drive_pub.publish(drive_msg)
 
