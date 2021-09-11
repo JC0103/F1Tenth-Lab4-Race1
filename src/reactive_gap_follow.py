@@ -15,17 +15,9 @@ from ackermann_msgs.msg import AckermannDriveStamped, AckermannDrive
 
 #Lidar Preprocess variables
 detect_angle = 120
-max_detect_dist = 2.3
+max_detect_dist = 2.25
 past_ranges_t1 = past_ranges_t2 = past_ranges_t3 = past_ranges_t4 = current_ranges_t5 = np.zeros(int(1080 * detect_angle / 360))
 width_car = 0.2032
-
-##PID Control Params
-kp = 1.0
-kd = 0.1
-ki = 0.0
-prev_error = 0.0
-integral = 0.0
-prev_time = 0.0
 
 class reactive_follow_gap:
     def __init__(self):
@@ -59,7 +51,7 @@ class reactive_follow_gap:
     def find_max_gap(self, free_space_ranges):
         """ Return the start index & end index of the max gap in free_space_ranges
         """
-        index_list = []
+        index_list = [0 ,0]
         max_gap_value = 0
         start = True
 
@@ -76,12 +68,14 @@ class reactive_follow_gap:
         if len(index_list) % 2 == 1:
             index_list.append(size(free_space_ranges) - 1)
 
+        max_gap_index = [index_list[0], index_list[1]]
         # Compute the max gap start and end indeces
         for i in range(int(len(index_list) / 2)):
                 gap_value = index_list[2 * i + 1] - index_list[2 * i]
-                if gap_value > max_gap_value:
+                if abs(gap_value) >= max_gap_value:
                     max_gap_value = gap_value
                     max_gap_index = [index_list[2 * i], index_list[2 * i +1]]
+                
         return max_gap_index
     
     def find_best_point(self, start_i, end_i, ranges, angle_incre):
@@ -98,7 +92,7 @@ class reactive_follow_gap:
             if( i < len(meaningful_ranges) - 1):
                 if meaningful_ranges[i+1] - meaningful_ranges[i] > disparity_dist:
                     # print("Enter1")
-                    steps_to_skip = disparity_count =  (width_car) // (meaningful_ranges[i] * angle_incre) 
+                    steps_to_skip = disparity_count =  (width_car) // (meaningful_ranges[i] * angle_incre) + 60
                     a = 1
                     # print(disparity_count)
                     while(disparity_count > 0 and i + a < len(meaningful_ranges)):
@@ -108,7 +102,10 @@ class reactive_follow_gap:
                     i += steps_to_skip - 1
                     continue
                 elif meaningful_ranges[i] - meaningful_ranges[i+1] > disparity_dist:
-                    steps_to_skip = disparity_count = (width_car) // (meaningful_ranges[i] * angle_incre) 
+                    if(meaningful_ranges[i+1] != 0):
+                        steps_to_skip = disparity_count = (width_car) // (meaningful_ranges[i+1] * angle_incre) + 60
+                    else:
+                        steps_to_skip = disparity_count = 0
                     a = 0
                     # print("Enter2")
                     while(disparity_count > 0 and i - a >= 0 and i + 1 <len(meaningful_ranges)):
@@ -118,12 +115,19 @@ class reactive_follow_gap:
                     i += steps_to_skip - 1
                     continue
                 # print(meaningful_ranges[i] - meaningful_ranges[i+1])
-        # print(meaningful_ranges)
-        return np.argmax(meaningful_ranges) + start_i
+        max_dist = np.amax(meaningful_ranges)
+        max_dist_index = np.argmax(meaningful_ranges)
+        max_dist_occurances = 0
+        sliced_ranges = meaningful_ranges[max_dist_index:]
+        for i in range(len(sliced_ranges) - 1):
+            if sliced_ranges[i+1] == max_dist:
+                max_dist_occurances +=1
+            elif sliced_ranges[i+1] != max_dist:
+                break
+        return np.argmax(meaningful_ranges) + start_i +  int ((max_dist_occurances + 1) / 2)
         
 
     def lidar_callback(self, data):
-        global integral, prev_error, kp, ki, kd, prev_time
 
         """ Process each LiDAR scan as per the Follow Gap algorithm & publish an AckermannDriveStamped Message
         """
@@ -135,7 +139,7 @@ class reactive_follow_gap:
         #Find closest point to LiDAR
         closest_point = np.argmin(proc_ranges)
         #Eliminate all points inside 'bubble' (set them to zero) 
-        bubble_radius = 0.55
+        bubble_radius = 0.75
         for i in range(size(proc_ranges)):
             if math.sqrt(proc_ranges[i] ** 2 + proc_ranges[closest_point] ** 2 - 2 * proc_ranges[i] * proc_ranges[closest_point] * math.cos(data.angle_increment)) < bubble_radius:
                 proc_ranges[i] = 0   
@@ -147,16 +151,9 @@ class reactive_follow_gap:
         angle_incre = data.angle_increment
 
         #Find the best point in the gap
-        best_point_index = self.find_best_point(start_i, end_i, proc_ranges, angle_incre) + start_i
-        # print(best_point_index)
-        #Implement PID controller for steering angle
-        current_time = rospy.get_time()
-        del_time = current_time - prev_time
-        integral += prev_error * del_time
+        best_point_index = self.find_best_point(start_i, end_i, proc_ranges, angle_incre)
+
         angle = (best_point_index - (len(ranges) - 1) / 2) * angle_incre
-        # angle = kp * angle_error + ki * integral + kd * (angle_error - prev_error) / del_time
-        # prev_error = angle_error
-        prev_time = current_time
 
         #Publish Drive message
         drive_msg = AckermannDriveStamped()
@@ -168,13 +165,13 @@ class reactive_follow_gap:
         else:
             drive_msg.drive.steering_angle = angle
         if abs(angle) > math.radians(0) and abs(angle) <= math.radians(10):
-            drive_msg.drive.speed = 3.5
+            drive_msg.drive.speed = 5.0
             # drive_msg.drive.steering_angle_velocity = 0.3
         elif abs(angle) > math.radians(10) and abs (angle) <= math.radians(20):
-            drive_msg.drive.speed = 2.0
+            drive_msg.drive.speed = 2.3
             # drive_msg.drive.steering_angle_velocity = 0.5
         else:
-            drive_msg.drive.speed = 1.0
+            drive_msg.drive.speed = 1.2
             # drive_msg.drive.steering_angle_velocity = 1.5
         self.drive_pub.publish(drive_msg)
 
