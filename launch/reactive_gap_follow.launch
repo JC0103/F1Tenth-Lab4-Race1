@@ -1,0 +1,4 @@
+<launch>
+    <include file = "$(find f1tenth_simulator)/launch/simulator.launch" />
+    <node pkg = "reactive_methods" type ="reactive_gap_follow.py" name = "reactive_gap_follow" output = "screen" />
+</launch>
